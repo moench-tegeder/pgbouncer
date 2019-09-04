@@ -17,12 +17,18 @@ pgbouncer_SOURCES = \
 	src/pooler.c \
 	src/proto.c \
 	src/sbuf.c \
+	src/scram.c \
 	src/server.c \
 	src/stats.c \
 	src/system.c \
 	src/takeover.c \
 	src/util.c \
 	src/varcache.c \
+	src/common/base64.c \
+	src/common/saslprep.c \
+	src/common/scram-common.c \
+	src/common/unicode_norm.c \
+	src/common/wchar.c \
 	include/admin.h \
 	include/bouncer.h \
 	include/client.h \
@@ -37,12 +43,20 @@ pgbouncer_SOURCES = \
 	include/pooler.h \
 	include/proto.h \
 	include/sbuf.h \
+	include/scram.h \
 	include/server.h \
 	include/stats.h \
 	include/system.h \
 	include/takeover.h \
 	include/util.h \
-	include/varcache.h
+	include/varcache.h \
+	include/common/base64.h \
+	include/common/pg_wchar.h \
+	include/common/postgres_compat.h \
+	include/common/saslprep.h \
+	include/common/scram-common.h \
+	include/common/unicode_norm.h \
+	include/common/unicode_norm_table.h
 
 pgbouncer_CPPFLAGS = -Iinclude $(CARES_CFLAGS) $(TLS_CPPFLAGS)
 
@@ -118,11 +132,15 @@ config.mak:
 	@echo "Please run ./configure"
 	@exit 1
 
+check: all
+	etc/optscan.sh
+	make -C test check
+
 deb:
 	debuild -b -us -uc
 
 w32arch = i686-w64-mingw32
-w32zip = pgbouncer-$(PACKAGE_VERSION)-win32.zip
+w32zip = $(PACKAGE_TARNAME)-$(PACKAGE_VERSION)-win32.zip
 zip: configure clean
 	rm -rf buildexe
 	mkdir buildexe
@@ -140,7 +158,7 @@ zip: configure clean
 zip-up: $(w32zip)
 	rsync $(w32zip) pgf:web/pgbouncer/htdocs/win32/
 
-tgz = pgbouncer-$(PACKAGE_VERSION).tar.gz
+tgz = $(PACKAGE_TARNAME)-$(PACKAGE_VERSION).tar.gz
 tgz-up: $(tgz)
 	rsync $(tgz) pgf:web/pgbouncer/htdocs/testing/
 

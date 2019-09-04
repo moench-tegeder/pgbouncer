@@ -1,5 +1,7 @@
 #! /bin/sh
 
+cd $(dirname $0)
+
 rm -rf TestCA1
 
 (
@@ -9,7 +11,6 @@ rm -rf TestCA1
 ./newsite.sh TestCA1 random C=QQ O=Org1 L=computer OU=Dev
 ) > /dev/null
 
-export PATH=/usr/lib/postgresql/9.4/bin:$PATH
 export PGDATA=$PWD/pgdata
 export PGHOST=localhost
 export PGPORT=6667
@@ -17,31 +18,38 @@ export EF_ALLOW_MALLOC_0=1
 
 mkdir -p tmp
 
-BOUNCER_LOG=tmp/test.log
+BOUNCER_LOG=test.log
 BOUNCER_INI=test.ini
-BOUNCER_PID=tmp/test.pid
+BOUNCER_PID=test.pid
 BOUNCER_PORT=`sed -n '/^listen_port/s/listen_port.*=[^0-9]*//p' $BOUNCER_INI`
-BOUNCER_EXE="../../pgbouncer"
+BOUNCER_EXE="$BOUNCER_EXE_PREFIX ../../pgbouncer"
 
-LOGDIR=tmp
-NC_PORT=6668
+LOGDIR=log
 PG_PORT=6666
 PG_LOG=$LOGDIR/pg.log
 
 pgctl() {
-	pg_ctl -o "-p $PG_PORT" -D $PGDATA $@ >>$PG_LOG 2>&1
+	pg_ctl -w -o "-p $PG_PORT" -D $PGDATA $@ >>$PG_LOG 2>&1
 }
 
-rm -f core
 ulimit -c unlimited
 
-for f in pgdata/postmaster.pid tmp/test.pid; do
-	test -f $f && { kill `cat $f` || true; }
-done
+stopit() {
+	local pid
+	if test -f "$1"; then
+		pid=`head -n1 "$1"`
+		kill $pid
+		while kill -0 $pid 2>/dev/null; do sleep 0.1; done
+		rm -f "$1"
+	fi
+}
+
+stopit test.pid
+stopit pgdata/postmaster.pid
 
 mkdir -p $LOGDIR
-rm -fr $BOUNCER_LOG $PG_LOG
-rm -fr $PGDATA
+rm -f $BOUNCER_LOG $PG_LOG
+rm -rf $PGDATA
 
 if [ ! -d $PGDATA ]; then
 	echo "initdb"
@@ -66,7 +74,6 @@ if [ ! -d $PGDATA ]; then
 fi
 
 pgctl start
-sleep 5
 
 echo "createdb"
 psql -X -p $PG_PORT -l | grep p0 > /dev/null || {
@@ -75,15 +82,12 @@ psql -X -p $PG_PORT -l | grep p0 > /dev/null || {
 	createdb -p $PG_PORT p1
 }
 
-$BOUNCER_EXE -d $BOUNCER_INI
-sleep 1
-
 reconf_bouncer() {
 	cp test.ini tmp/test.ini
 	for ln in "$@"; do
 		echo "$ln" >> tmp/test.ini
 	done
-	test -f tmp/test.pid && kill `cat tmp/test.pid`
+	test -f test.pid && kill `cat test.pid`
 	sleep 1
 	$BOUNCER_EXE -v -v -v -d tmp/test.ini
 }
@@ -126,20 +130,26 @@ admin() {
 runtest() {
 	local status
 
+	$BOUNCER_EXE -d $BOUNCER_INI
+	until psql -X -h /tmp -U pgbouncer -d pgbouncer -c "show version" 2>/dev/null 1>&2; do sleep 0.1; done
+
 	printf "`date` running $1 ... "
+	echo "# $1 begin" >>$BOUNCER_LOG
 	eval $1 >$LOGDIR/$1.log 2>&1
 	status=$?
 	if [ $status -eq 0 ]; then
 		echo "ok"
 	else
 		echo "FAILED"
+		cat $LOGDIR/$1.log | sed 's/^/# /'
 	fi
 	date >> $LOGDIR/$1.log
 
 	# allow background processing to complete
 	wait
-	# start with fresh config
-	kill -HUP `cat $BOUNCER_PID`
+
+	stopit test.pid
+	echo "# $1 end" >>$BOUNCER_LOG
 
 	return $status
 }

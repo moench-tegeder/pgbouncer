@@ -21,6 +21,7 @@
  */
 
 #include "bouncer.h"
+#include "scram.h"
 
 /* those items will be allocated as needed, never freed */
 STATLIST(user_list);
@@ -186,9 +187,8 @@ void change_client_state(PgSocket *client, SocketState newstate)
 		statlist_append(&login_client_list, &client->head);
 		break;
 	case CL_WAITING:
-		client->wait_start = get_cached_time();
-		/* fallthrough */
 	case CL_WAITING_LOGIN:
+		client->wait_start = get_cached_time();
 		statlist_append(&pool->waiting_client_list, &client->head);
 		break;
 	case CL_ACTIVE:
@@ -866,6 +866,8 @@ void disconnect_server(PgSocket *server, bool notify, const char *reason, ...)
 		server->dns_token = NULL;
 	}
 
+	free_scram_state(&server->scram_state);
+
 	server->pool->db->connection_count--;
 	server->pool->user->connection_count--;
 
@@ -921,6 +923,8 @@ void disconnect_client(PgSocket *client, bool notify, const char *reason, ...)
 		 */
 		send_pooler_error(client, false, reason);
 	}
+
+	free_scram_state(&client->scram_state);
 
 	change_client_state(client, CL_JUSTFREE);
 	if (!sbuf_close(&client->sbuf))
@@ -1001,7 +1005,6 @@ static void dns_connect(struct PgSocket *server)
 	int res;
 
 	if (!host || host[0] == '/') {
-		slog_noise(server, "unix socket: %s", sa_un.sun_path);
 		memset(&sa_un, 0, sizeof(sa_un));
 		sa_un.sun_family = AF_UNIX;
 		unix_dir = host ? host : cf_unix_socket_dir;
@@ -1012,6 +1015,7 @@ static void dns_connect(struct PgSocket *server)
 		}
 		snprintf(sa_un.sun_path, sizeof(sa_un.sun_path),
 			 "%s/.s.PGSQL.%d", unix_dir, db->port);
+		slog_noise(server, "unix socket: %s", sa_un.sun_path);
 		sa = (struct sockaddr *)&sa_un;
 		sa_len = sizeof(sa_un);
 		res = 1;

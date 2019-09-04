@@ -35,7 +35,7 @@
 static const char usage_str[] =
 "Usage: %s [OPTION]... config.ini\n"
 "  -d, --daemon           Run in background (as a daemon)\n"
-"  -R, --restart          Do a online restart\n"
+"  -R, --restart          Do an online restart\n"
 "  -q, --quiet            Run quietly\n"
 "  -v, --verbose          Increase verbosity\n"
 "  -u, --user=<username>  Assume identity of <username>\n"
@@ -138,6 +138,7 @@ char *cf_jobname;
 char *cf_admin_users;
 char *cf_stats_users;
 int cf_stats_period;
+int cf_log_stats;
 
 int cf_log_connections;
 int cf_log_disconnections;
@@ -177,6 +178,7 @@ static const struct CfLookup auth_type_map[] = {
 #ifdef HAVE_PAM
 	{ "pam", AUTH_PAM },
 #endif
+	{ "scram-sha-256", AUTH_SCRAM_SHA_256 },
 	{ NULL }
 };
 
@@ -270,6 +272,7 @@ CF_ABS("verbose", CF_INT, cf_verbose, 0, NULL),
 CF_ABS("admin_users", CF_STR, cf_admin_users, 0, ""),
 CF_ABS("stats_users", CF_STR, cf_stats_users, 0, ""),
 CF_ABS("stats_period", CF_INT, cf_stats_period, 0, "60"),
+CF_ABS("log_stats", CF_INT, cf_log_stats, 0, "1"),
 CF_ABS("log_connections", CF_INT, cf_log_connections, 0, "1"),
 CF_ABS("log_disconnections", CF_INT, cf_log_disconnections, 0, "1"),
 CF_ABS("log_pooler_errors", CF_INT, cf_log_pooler_errors, 0, "1"),
@@ -582,28 +585,23 @@ static void remove_pidfile(void)
 static void check_pidfile(void)
 {
 	char buf[128 + 1];
-	struct stat st;
 	pid_t pid = 0;
 	int fd, res, err;
 
 	if (!cf_pidfile || !cf_pidfile[0])
 		return;
 
-	/* check if pidfile exists */
-	if (stat(cf_pidfile, &st) < 0) {
-		if (errno != ENOENT)
-			fatal_perror("stat");
-		return;
-	}
-
 	/* read old pid */
 	fd = open(cf_pidfile, O_RDONLY);
-	if (fd < 0)
-		goto locked_pidfile;
+	if (fd < 0) {
+		if (errno == ENOENT)
+			return;
+		fatal_perror("could not open pidfile");
+	}
 	res = read(fd, buf, sizeof(buf) - 1);
 	close(fd);
 	if (res <= 0)
-		goto locked_pidfile;
+		fatal_perror("could not read pidfile");
 
 	/* parse pid */
 	buf[res] = 0;
@@ -621,7 +619,7 @@ static void check_pidfile(void)
 	log_info("stale pidfile, removing");
 	err = unlink(cf_pidfile);
 	if (err != 0)
-		fatal_perror("cannot remove stale pidfile");
+		fatal_perror("could not remove stale pidfile");
 	return;
 
 locked_pidfile:

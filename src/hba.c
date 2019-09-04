@@ -592,6 +592,8 @@ static bool parse_line(struct HBA *hba, struct TokParser *tp, int linenr, const 
 	} else if (eat_kw(tp, "pam")) {
 		rule->rule_method = AUTH_PAM;
 #endif
+	} else if (eat_kw(tp, "scram-sha-256")) {
+		rule->rule_method = AUTH_SCRAM_SHA_256;
 	} else {
 		log_warning("hba line %d: unsupported method: buf=%s", linenr, tp->buf);
 		goto failed;
